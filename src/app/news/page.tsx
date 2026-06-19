@@ -9,8 +9,10 @@ export const metadata = {
 async function fetchNews(): Promise<NewsArticle[]> {
   try {
     // Determine the base URL for fetching on the server side
-    const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
-    const host = process.env.VERCEL_URL || "127.0.0.1:3000";
+    // On Vercel, use the VERCEL_URL with https.
+    // On Cloud Run / Local, use internal HTTP to the bound PORT.
+    const protocol = process.env.VERCEL_URL ? "https" : "http";
+    const host = process.env.VERCEL_URL || `127.0.0.1:${process.env.PORT || 3000}`;
     const baseUrl = `${protocol}://${host}`;
 
     const res = await fetch(`${baseUrl}/api/news`, {
