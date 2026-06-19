@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { sanitizeHabitInput } from "@/utils/sanitizer";
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const OPENAI_MODEL = "gpt-4o";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODEL = "deepseek-r1-distill-llama-70b";
 
 interface NudgeResult {
   trees: number;
@@ -14,19 +14,19 @@ interface GroqResponse {
   choices: { message: { content: string } }[];
 }
 
-/** Calls OpenAI (GPT-4o) to estimate carbon footprint of any habit. */
-async function analyseWithOpenAI(habit: string): Promise<NudgeResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("No OPENAI_API_KEY");
+/** Calls Groq (DeepSeek R1) to estimate carbon footprint of any habit. */
+async function analyseWithGroq(habit: string): Promise<NudgeResult> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("No GROQ_API_KEY");
 
-  const res = await fetch(OPENAI_URL, {
+  const res = await fetch(GROQ_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
+      model: GROQ_MODEL,
       temperature: 0.2,
       max_tokens: 150,
       messages: [
@@ -52,15 +52,18 @@ Rules: co2kg and trees MUST be integers. Do not explain the math, just return th
 
   if (!res.ok) {
     const err = (await res.json()) as { error?: { message?: string } };
-    throw new Error(`OpenAI ${res.status}: ${err.error?.message ?? "unknown"}`);
+    throw new Error(`Groq ${res.status}: ${err.error?.message ?? "unknown"}`);
   }
 
   const data = (await res.json()) as GroqResponse;
-  const raw = data.choices[0].message.content;
+  let raw = data.choices[0].message.content;
+
+  // DeepSeek R1 may include <think> tags. Strip them out before parsing JSON.
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in OpenAI response");
+  if (start === -1 || end === -1) throw new Error("No JSON in Groq response");
 
   const parsed = JSON.parse(raw.slice(start, end + 1)) as NudgeResult;
   return {
@@ -107,9 +110,9 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     let result: NudgeResult;
     try {
-      result = await analyseWithOpenAI(habit);
+      result = await analyseWithGroq(habit);
     } catch (e) {
-      console.warn("[nudge] OpenAI unavailable, using rule-based fallback:", e instanceof Error ? e.message : e);
+      console.warn("[nudge] Groq unavailable, using rule-based fallback:", e instanceof Error ? e.message : e);
       result = ruleBasedFallback(habit);
     }
 
