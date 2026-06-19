@@ -7,6 +7,8 @@ export const metadata = {
   description: "Read the latest news and insights on carbon footprints and sustainability.",
 };
 
+export const dynamic = "force-dynamic";
+
 async function fetchNews(): Promise<NewsArticle[]> {
   try {
     // Call the route handler function directly to bypass loopback HTTP issues on Cloud Run
