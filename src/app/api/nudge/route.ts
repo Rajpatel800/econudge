@@ -37,7 +37,14 @@ async function analyseWithGroq(habit: string): Promise<NudgeResult> {
         },
         {
           role: "user",
-          content: `Estimate the annual CO₂ impact of this habit: "${habit}". Rules: co2kg must be a realistic integer representing the ANNUAL kg of CO2 (e.g. 1 cigarette/day = 5 kg/year, daily beef = 700 kg/year, monthly short flight = 3060 kg/year, 2h Netflix/day = 26 kg/year, 10mi commute/day = 1050 kg/year). trees = Math.ceil(co2kg/21). nudge must be specific to this habit.`,
+          content: `Analyze this daily habit using real-world scientific data and carbon emission statistics: "${habit}". 
+          
+Step 1: Estimate the footprint in kg of CO2 per occurrence.
+Step 2: Multiply by the frequency to get the total ANNUAL kg of CO2 (co2kg).
+Step 3: Calculate trees needed to offset (trees = Math.ceil(co2kg / 21)).
+Step 4: Provide a specific, actionable nudge.
+
+Rules: co2kg and trees MUST be integers. Do not explain the math, just return the JSON.`,
         },
       ],
     }),
