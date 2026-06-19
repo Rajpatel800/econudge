@@ -1,4 +1,5 @@
 import ArticleCard from "@/components/news/ArticleCard";
+import { GET } from "@/app/api/news/route";
 import type { NewsArticle } from "@/app/api/news/route";
 
 export const metadata = {
@@ -8,19 +9,12 @@ export const metadata = {
 
 async function fetchNews(): Promise<NewsArticle[]> {
   try {
-    // Determine the base URL for fetching on the server side
-    // On Vercel, use the VERCEL_URL with https.
-    // On Cloud Run / Local, use internal HTTP to the bound PORT.
-    const protocol = process.env.VERCEL_URL ? "https" : "http";
-    const host = process.env.VERCEL_URL || `127.0.0.1:${process.env.PORT || 3000}`;
-    const baseUrl = `${protocol}://${host}`;
+    // Call the route handler function directly to bypass loopback HTTP issues on Cloud Run
+    const req = new Request("http://localhost/api/news", { method: "GET" });
+    const res = await GET(req);
 
-    const res = await fetch(`${baseUrl}/api/news`, {
-      cache: "no-store", // Always hit the API route to check the calendar day
-    });
-
-    if (!res.ok) throw new Error("Failed to fetch news");
-    return res.json();
+    if (!res.ok) throw new Error("Failed to fetch news directly");
+    return await res.json();
   } catch (err) {
     console.error(err);
     // Return an empty array to be handled by the UI gracefully

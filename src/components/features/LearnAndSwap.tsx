@@ -108,7 +108,7 @@ export default function LearnAndSwap() {
           <span className="material-symbols-outlined text-error text-sm" aria-hidden="true">info</span>
           <p className="text-sm font-quicksand text-on-surface-variant">
             Could not reach AI — showing sample items. Add your{" "}
-            <code className="text-primary text-xs">GEMINI_API_KEY</code> to{" "}
+            <code className="text-primary text-xs">GROQ_API_KEY</code> to{" "}
             <code className="text-primary text-xs">.env.local</code> to enable live generation.
           </p>
         </div>
