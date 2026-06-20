@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { sanitizeHabitInput } from "@/utils/sanitizer";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "deepseek-r1-distill-llama-70b";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 interface NudgeResult {
   trees: number;
   co2kg: number;
   nudge: string;
+  isFallback?: boolean;
 }
 
 interface GroqResponse {
@@ -28,7 +29,7 @@ async function analyseWithGroq(habit: string): Promise<NudgeResult> {
     body: JSON.stringify({
       model: GROQ_MODEL,
       temperature: 0.2,
-      max_tokens: 150,
+      max_tokens: 2000,
       messages: [
         {
           role: "system",
@@ -56,10 +57,7 @@ Rules: co2kg and trees MUST be integers. Do not explain the math, just return th
   }
 
   const data = (await res.json()) as GroqResponse;
-  let raw = data.choices[0].message.content;
-
-  // DeepSeek R1 may include <think> tags. Strip them out before parsing JSON.
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const raw = data.choices[0].message.content;
 
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
@@ -80,21 +78,21 @@ function ruleBasedFallback(habit: string): NudgeResult {
   const milesMatch = h.match(/(\d+(?:\.\d+)?)\s*miles?/i);
   if (milesMatch) {
     const co2kg = Math.round(parseFloat(milesMatch[1]) * 2 * 0.21 * 250);
-    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Try carpooling or working from home one day a week to cut this by 20%." };
+    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Try carpooling or working from home one day a week to cut this by 20%.", isFallback: true };
   }
   if (h.includes("cigarette") || h.includes("smoke") || h.includes("cigar")) {
     const n = parseInt(h.match(/(\d+)/)?.[1] ?? "1");
     const co2kg = Math.max(5, Math.round(n * 0.0015 * 365));
-    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Each cigarette pack produces ~3.5 kg CO₂. Cutting back saves both carbon and health costs." };
+    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Each cigarette pack produces ~3.5 kg CO₂. Cutting back saves both carbon and health costs.", isFallback: true };
   }
   if (h.includes("flight") || h.includes("fly") || h.includes("plane"))
-    return { co2kg: 255, trees: 13, nudge: "Consider trains for journeys under 500 km — they emit 90% less CO₂ than flying." };
+    return { co2kg: 255, trees: 13, nudge: "Consider trains for journeys under 500 km — they emit 90% less CO₂ than flying.", isFallback: true };
   if (h.includes("beef") || h.includes("burger") || h.includes("steak") || h.includes("meat"))
-    return { co2kg: 700, trees: 34, nudge: "One meat-free day per week saves ~350 kg CO₂/year — equal to 3 months of not driving." };
+    return { co2kg: 700, trees: 34, nudge: "One meat-free day per week saves ~350 kg CO₂/year — equal to 3 months of not driving.", isFallback: true };
   if (h.includes("stream") || h.includes("netflix") || h.includes("youtube") || h.includes("video"))
-    return { co2kg: 26, trees: 2, nudge: "Download content over Wi-Fi and watch offline — streaming on cellular uses 20× more energy." };
+    return { co2kg: 26, trees: 2, nudge: "Download content over Wi-Fi and watch offline — streaming on cellular uses 20× more energy.", isFallback: true };
 
-  return { co2kg: 180, trees: 9, nudge: "Small swaps add up. Try one plant-based meal a week to reduce your annual footprint." };
+  return { co2kg: 180, trees: 9, nudge: "Small swaps add up. Try one plant-based meal a week to reduce your annual footprint.", isFallback: true };
 }
 
 /** POST /api/nudge — analyses any daily habit and returns its carbon impact. */

@@ -4,6 +4,7 @@ export interface NudgeResult {
   trees: number;
   co2kg: number;
   nudge: string;
+  isFallback?: boolean;
 }
 
 interface NudgeResultDisplayProps {
@@ -51,7 +52,12 @@ export default function NudgeResultDisplay({
       )}
 
       {result && (
-        <div className="fade-in w-full flex flex-col items-center">
+        <div className="fade-in w-full flex flex-col items-center relative pt-2">
+          {result.isFallback && (
+            <div className="absolute -top-2 right-0 bg-error/10 text-error border border-error/20 text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded">
+              AI Offline - Estimates Mode
+            </div>
+          )}
           <p className="text-on-surface-variant text-label-sm font-inter mb-4 uppercase tracking-widest">
             Annual Impact
           </p>
