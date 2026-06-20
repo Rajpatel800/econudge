@@ -1,8 +1,39 @@
 import { NextResponse } from "next/server";
 import { sanitizeHabitInput } from "@/utils/sanitizer";
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const AZURE_MODEL = "gpt-4.1-mini";
+
+// ─── Verified scientific emission factors (kg CO2e per unit, per occurrence) ──
+// Sources: IPCC AR6, FAO 2023, UK DEFRA 2023, EPA GHG Equivalencies Calculator
+const EMISSION_FACTORS: Record<string, number> = {
+  cigarette:        0.014,   // per cigarette/day
+  cigar:            0.023,   // per cigar/day
+  beef_burger:      2.5,     // per burger/day
+  beef_kg:          27.0,    // per kg beef/day
+  chicken_meal:     0.6,     // per meal/day
+  pork_meal:        1.2,     // per meal/day
+  vegan_meal:       0.2,     // per meal/day
+  egg:              0.1,     // per egg/day
+  dairy_milk_litre: 1.3,     // per litre/day
+  beer:             0.5,     // per beer/day
+  car_km:           0.21,    // per km/day
+  bike_km:          0.006,   // per km/day (motorbike)
+  bus_km:           0.089,   // per km/day
+  train_km:         0.041,   // per km/day
+  flight_domestic:  255,     // per flight/month (×12/year)
+  flight_longhaul:  1500,    // per flight/year (×1/year)
+  ac_hour:          0.7,     // per hour/day
+  shower_10min:     0.5,     // per shower/day
+  washing_machine:  0.6,     // per cycle/day
+  pc_hour:          0.05,    // per hour/day
+  tv_hour:          0.1,     // per hour/day
+  streaming_hour:   0.036,   // per hour/day
+  gaming_hour:      0.1,     // per hour/day
+  tshirt:           7.0,     // per item (one-off, ×1/year)
+  jeans:            33.0,    // per item (one-off, ×1/year)
+  smartphone:       70.0,    // per item (one-off, ×1/year)
+  laptop:           400.0,   // per item (one-off, ×1/year)
+};
 
 interface NudgeResult {
   trees: number;
@@ -11,91 +42,114 @@ interface NudgeResult {
   isFallback?: boolean;
 }
 
-interface GroqResponse {
-  choices: { message: { content: string } }[];
+interface AzureResponse {
+  output: { content: { type: string, text: string }[] }[];
 }
 
-/** Calls Groq (DeepSeek R1) to estimate carbon footprint of any habit. */
-async function analyseWithGroq(habit: string): Promise<NudgeResult> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("No GROQ_API_KEY");
+interface AIExtraction {
+  habitKey: string;          // must match a key in EMISSION_FACTORS
+  quantity: number;          // exact number user mentioned
+  frequencyPerYear: number;  // 365=daily, 52=weekly, 12=monthly, 1=once/one-off
+  nudge: string;             // personalized tip mentioning the quantity
+}
 
-  const res = await fetch(GROQ_URL, {
+/**
+ * Step 1: AI classifies the habit → returns habitKey, quantity, frequencyPerYear.
+ * Step 2: TypeScript does ALL the math using our verified factors.
+ * This guarantees accurate, proportional results regardless of LLM variability.
+ */
+async function analyseHabit(habit: string): Promise<NudgeResult> {
+  const apiKey = process.env.AZURE_OPENAI_KEY;
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+  if (!apiKey || !endpoint) throw new Error("Missing Azure credentials");
+
+  const availableKeys = Object.keys(EMISSION_FACTORS).join(", ");
+
+  const prompt = `You are a habit classifier. Your ONLY job is to classify a user's habit into a structured JSON object.
+Available habitKeys: ${availableKeys}
+Rules:
+- habitKey: pick the BEST matching key from the list above.
+- quantity: extract the EXACT number the user mentions. If no number, use 1.
+- frequencyPerYear: 365 if daily/everyday, 52 if weekly, 12 if monthly, 1 if once or one-off purchase.
+- nudge: one personalized sentence that mentions the exact quantity and suggests a realistic improvement.
+Respond ONLY with valid JSON: {"habitKey":"<key>","quantity":<number>,"frequencyPerYear":<number>,"nudge":"<string>"}`;
+
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "api-key": apiKey
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
-      temperature: 0.2,
-      max_tokens: 2000,
-      messages: [
-        {
-          role: "system",
-          content:
-            'You are a carbon footprint calculator. Always respond with ONLY valid JSON — no markdown, no explanation. Format: {"co2kg":<integer>,"trees":<integer>,"nudge":"<one sentence tip specific to the habit>"}',
-        },
-        {
-          role: "user",
-          content: `Analyze this daily habit using real-world scientific data and carbon emission statistics: "${habit}". 
-          
-Step 1: Estimate the footprint in kg of CO2 per occurrence.
-Step 2: Multiply by the frequency to get the total ANNUAL kg of CO2 (co2kg).
-Step 3: Calculate trees needed to offset (trees = Math.ceil(co2kg / 21)).
-Step 4: Provide a specific, actionable nudge.
-
-Rules: co2kg and trees MUST be integers. Do not explain the math, just return the JSON.`,
-        },
-      ],
+      model: AZURE_MODEL,
+      temperature: 0.1,
+      max_output_tokens: 250,
+      input: [
+        { role: "system", content: prompt },
+        { role: "user", content: `Classify this habit: "${habit}"` }
+      ]
     }),
   });
 
   if (!res.ok) {
     const err = (await res.json()) as { error?: { message?: string } };
-    throw new Error(`Groq ${res.status}: ${err.error?.message ?? "unknown"}`);
+    throw new Error(`Azure ${res.status}: ${err.error?.message ?? "unknown"}`);
   }
 
-  const data = (await res.json()) as GroqResponse;
-  const raw = data.choices[0].message.content;
+  const data = (await res.json()) as AzureResponse;
+  const raw = data.output[0].content[0].text;
 
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in Groq response");
+  if (start === -1 || end === -1) throw new Error("No JSON in Azure response");
 
-  const parsed = JSON.parse(raw.slice(start, end + 1)) as NudgeResult;
+  const extracted = JSON.parse(raw.slice(start, end + 1)) as AIExtraction;
+
+  const kgPerUnit = EMISSION_FACTORS[extracted.habitKey];
+  if (kgPerUnit === undefined) throw new Error(`Unknown habitKey: ${extracted.habitKey}`);
+
+  // ── All math done in TypeScript — 100% deterministic, never hallucinated ──
+  const co2kg = Math.round(kgPerUnit * extracted.quantity * extracted.frequencyPerYear);
+
   return {
-    co2kg: Math.max(1, Math.round(Number(parsed.co2kg))),
-    trees: Math.max(1, Math.round(Number(parsed.trees))),
-    nudge: String(parsed.nudge),
+    co2kg: Math.max(1, co2kg),
+    trees: Math.max(1, Math.ceil(co2kg / 21)),
+    nudge: String(extracted.nudge),
   };
 }
 
-/** Rule-based fallback when AI is unavailable. */
+/** Rule-based fallback when AI is unavailable — uses same verified factors. */
 function ruleBasedFallback(habit: string): NudgeResult {
   const h = habit.toLowerCase();
+  const n = Math.max(1, parseInt(h.match(/(\d+)/)?.[1] ?? "1"));
 
   const milesMatch = h.match(/(\d+(?:\.\d+)?)\s*miles?/i);
   if (milesMatch) {
-    const co2kg = Math.round(parseFloat(milesMatch[1]) * 2 * 0.21 * 250);
+    const km = parseFloat(milesMatch[1]) * 1.609;
+    const co2kg = Math.round(EMISSION_FACTORS.car_km * km * 365);
     return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Try carpooling or working from home one day a week to cut this by 20%.", isFallback: true };
   }
   if (h.includes("cigarette") || h.includes("smoke") || h.includes("cigar")) {
-    const n = parseInt(h.match(/(\d+)/)?.[1] ?? "1");
-    const co2kg = Math.max(5, Math.round(n * 0.0015 * 365));
-    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Each cigarette pack produces ~3.5 kg CO₂. Cutting back saves both carbon and health costs.", isFallback: true };
+    const co2kg = Math.round(EMISSION_FACTORS.cigarette * n * 365);
+    return { co2kg: Math.max(1, co2kg), trees: Math.max(1, Math.ceil(co2kg / 21)), nudge: `Smoking ${n} cigarettes daily adds up — cutting to ${Math.max(1, Math.floor(n / 2))} would halve your carbon footprint.`, isFallback: true };
   }
-  if (h.includes("flight") || h.includes("fly") || h.includes("plane"))
-    return { co2kg: 255, trees: 13, nudge: "Consider trains for journeys under 500 km — they emit 90% less CO₂ than flying.", isFallback: true };
-  if (h.includes("beef") || h.includes("burger") || h.includes("steak") || h.includes("meat"))
-    return { co2kg: 700, trees: 34, nudge: "One meat-free day per week saves ~350 kg CO₂/year — equal to 3 months of not driving.", isFallback: true };
-  if (h.includes("stream") || h.includes("netflix") || h.includes("youtube") || h.includes("video"))
-    return { co2kg: 26, trees: 2, nudge: "Download content over Wi-Fi and watch offline — streaming on cellular uses 20× more energy.", isFallback: true };
+  if (h.includes("beef") || h.includes("burger") || h.includes("steak")) {
+    const co2kg = Math.round(EMISSION_FACTORS.beef_burger * n * 365);
+    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: `Swapping ${n} beef burgers for chicken daily would cut your food footprint by over 75%.`, isFallback: true };
+  }
+  if (h.includes("flight") || h.includes("fly") || h.includes("plane")) {
+    const co2kg = Math.round(EMISSION_FACTORS.flight_domestic * n * 12);
+    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Consider trains for journeys under 500 km — they emit 90% less CO₂ than flying.", isFallback: true };
+  }
+  if (h.includes("stream") || h.includes("netflix") || h.includes("youtube") || h.includes("video")) {
+    const co2kg = Math.round(EMISSION_FACTORS.streaming_hour * n * 365);
+    return { co2kg: Math.max(1, co2kg), trees: Math.max(1, Math.ceil(co2kg / 21)), nudge: "Download content over Wi-Fi and watch offline — streaming on cellular uses 20× more energy.", isFallback: true };
+  }
 
   return { co2kg: 180, trees: 9, nudge: "Small swaps add up. Try one plant-based meal a week to reduce your annual footprint.", isFallback: true };
 }
 
-/** POST /api/nudge — analyses any daily habit and returns its carbon impact. */
+/** POST /api/nudge */
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as { habit?: unknown };
@@ -108,9 +162,9 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     let result: NudgeResult;
     try {
-      result = await analyseWithGroq(habit);
+      result = await analyseHabit(habit);
     } catch (e) {
-      console.warn("[nudge] Groq unavailable, using rule-based fallback:", e instanceof Error ? e.message : e);
+      console.warn("[nudge] Azure unavailable, using rule-based fallback:", e instanceof Error ? e.message : e);
       result = ruleBasedFallback(habit);
     }
 
