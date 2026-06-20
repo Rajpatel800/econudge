@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
 import { fetchGroq, fetchUnsplashImage } from "@/utils/ai";
+import { isCacheValid, createCacheEntry, CacheEntry } from "@/utils/cache";
 
-/** 
- * Simple in-memory cache — reuses results for 60 seconds to avoid API 429 rate limit errors. 
- * Essential for maintaining high availability during hackathon demonstrations.
- */
-interface CacheEntry {
-  data: unknown[];
-  expiresAt: number;
-}
-let cache: CacheEntry | null = null;
+let cache: CacheEntry<unknown[]> | null = null;
 
 /** Topics already used this session to avoid repeat items on refresh. */
 const usedTopics = new Set<string>();
@@ -72,7 +65,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const forceRefresh = url.searchParams.get("refresh") === "1";
 
   // Return cached result if still fresh and not a forced refresh
-  if (!forceRefresh && cache && Date.now() < cache.expiresAt) {
+  if (!forceRefresh && isCacheValid(cache)) {
     return NextResponse.json(cache.data, { status: 200 });
   }
 
@@ -100,7 +93,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     );
 
     // Cache for 60 seconds
-    cache = { data: itemsWithImages, expiresAt: Date.now() + 60_000 };
+    cache = createCacheEntry(itemsWithImages, 60_000);
     return NextResponse.json(itemsWithImages, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
