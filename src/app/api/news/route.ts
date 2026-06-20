@@ -1,13 +1,20 @@
 import { NextResponse } from "next/server";
 import { fetchGroq, fetchUnsplashImage } from "@/utils/ai";
 
-/** Cached news entries to simulate "daily" updates */
+/** 
+ * Cached structure to simulate "daily" updates and prevent unnecessary Groq calls. 
+ * This drastically improves efficiency and lowers API costs.
+ */
 interface CacheEntry {
   data: unknown[];
   dateStr: string;
 }
 let cache: CacheEntry | null = null;
 
+/**
+ * Strict system prompt defining the persona and output schema for the Groq LLM.
+ * Forces the model to return exactly 4 articles in a valid JSON format.
+ */
 const SYSTEM_PROMPT = `You are a climate science journalist. Write exactly 4 short, engaging news articles or blog posts about sustainability, eco-friendly innovations, or carbon footprints. 
 Return ONLY a valid JSON array with exactly 4 objects. No markdown, no explanation.
 
@@ -22,6 +29,9 @@ Each object must match this schema exactly:
   "searchTerm": "A 1-2 word search term to fetch an Unsplash image (e.g. 'solar panels', 'forest')"
 }`;
 
+/**
+ * Represents the raw article data generated directly by the Groq AI before image mapping.
+ */
 export interface RawNewsArticle {
   id: string;
   title: string;
@@ -32,12 +42,18 @@ export interface RawNewsArticle {
   searchTerm: string;
 }
 
+/**
+ * Represents the final article object sent to the frontend, complete with an Unsplash image.
+ */
 export interface NewsArticle extends Omit<RawNewsArticle, "searchTerm"> {
   imageUrl: string;
   imageAlt: string;
 }
 
-/** Calls Groq via the shared utility to generate 4 fresh news articles as structured JSON. */
+/**
+ * Calls the central Groq utility to generate 4 fresh news articles as structured JSON.
+ * @returns A Promise resolving to an array of RawNewsArticle.
+ */
 async function generateNewsArticles(): Promise<RawNewsArticle[]> {
   return fetchGroq<RawNewsArticle[]>(
     SYSTEM_PROMPT,
@@ -45,7 +61,14 @@ async function generateNewsArticles(): Promise<RawNewsArticle[]> {
   );
 }
 
-/** GET /api/news — returns 4 dynamically AI-generated news articles with images. */
+/** 
+ * API Route Handler for GET /api/news.
+ * Fetches 4 dynamic AI-generated news articles, maps them to contextual Unsplash images,
+ * and implements daily server-side caching to ensure extreme efficiency.
+ * 
+ * @param request - The incoming HTTP GET request.
+ * @returns A NextResponse containing the array of fully formed NewsArticles.
+ */
 export async function GET(request: Request): Promise<NextResponse> {
   const url = new URL(request.url);
   const forceRefresh = url.searchParams.get("refresh") === "1";

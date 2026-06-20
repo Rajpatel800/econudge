@@ -7,15 +7,22 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
 const UNSPLASH_API_URL = "https://api.unsplash.com/photos/random";
 
+/**
+ * Structure of the payload returned by the Groq OpenAI-compatible completions API.
+ */
 interface GroqResponse {
   choices: { message: { content: string } }[];
 }
 
 /**
- * Fetches a structured JSON response from Groq.
- * @param systemPrompt The system instructions.
- * @param userPrompt The user prompt.
- * @returns A Promise resolving to the parsed JSON object of type T.
+ * Fetches a strictly structured JSON response from Groq using llama-3.3-70b-versatile.
+ * This function acts as the central AI generation engine for non-deterministic tasks
+ * (like News, Trivia, and Catalog generation), saving costs on premium Azure tokens.
+ *
+ * @param systemPrompt - The strict system instructions guiding the AI's behavior.
+ * @param userPrompt - The specific task or context provided by the user/system.
+ * @returns A Promise resolving to the parsed JSON object of generic type T.
+ * @throws Will throw an Error if the API is unreachable or fails to return valid JSON.
  */
 export async function fetchGroq<T>(systemPrompt: string, userPrompt: string): Promise<T> {
   const apiKey = process.env.GROQ_API_KEY;
@@ -65,9 +72,13 @@ export async function fetchGroq<T>(systemPrompt: string, userPrompt: string): Pr
 }
 
 /**
- * Fetches a relevant image URL from Unsplash for a given search term.
- * @param searchTerm The term to search for (e.g., "solar panels").
- * @returns An object containing the image URL and an alt description.
+ * Dynamically fetches a relevant, high-quality image URL from Unsplash.
+ * Utilizes the Unsplash API with strict content filtering to ensure professional UI/UX.
+ * If the API rate limit is hit or the network fails, it seamlessly falls back to a 
+ * beautifully styled placeholder image generated via Placehold.co.
+ *
+ * @param searchTerm - The specific keyword to search for (e.g., "solar panels", "electric car").
+ * @returns An object containing the secure image `url` and an accessible `alt` description.
  */
 export async function fetchUnsplashImage(searchTerm: string): Promise<{ url: string; alt: string }> {
   const unsplashKey = process.env.UNSPLASH_ACCESS_KEY;
