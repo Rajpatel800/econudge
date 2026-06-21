@@ -1,15 +1,14 @@
+/**
+ * @fileoverview EcoTrivia — Orchestrates the AI-powered eco-trivia game.
+ * Manages question fetching, session state, and delegates rendering to TriviaCard.
+ * @module components/gamification/EcoTrivia
+ */
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import TriviaCard, { type TriviaQuestion } from "./TriviaCard";
 
-interface TriviaQuestion {
-  id: string;
-  question: string;
-  options: string[];
-  correctIndex: number;
-  explanation: string;
-}
-
+/** Static fallback questions displayed when the API is unavailable. */
 const FALLBACK_BANK: TriviaQuestion[] = [
   {
     id: "q1",
@@ -48,6 +47,12 @@ const FALLBACK_BANK: TriviaQuestion[] = [
   },
 ];
 
+/**
+ * EcoTrivia orchestrates the trivia session: fetching questions, tracking seen
+ * questions, and delegating card rendering to the TriviaCard component.
+ *
+ * @returns The full Eco-Trivia section with header and game card.
+ */
 export default function EcoTrivia() {
   const [questions, setQuestions] = useState<TriviaQuestion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,8 +71,7 @@ export default function EcoTrivia() {
     } catch {
       setQuestions(FALLBACK_BANK);
     } finally {
-      // Pick a random starting question
-      const randomStart = Math.floor(Math.random() * 5); // Assuming 5 questions
+      const randomStart = Math.floor(Math.random() * 5);
       setCurrentIndex(randomStart);
       setSeen(new Set([randomStart]));
       setSelected(null);
@@ -76,11 +80,22 @@ export default function EcoTrivia() {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      void loadQuestions(false);
-    }, 0);
+    const timer = setTimeout(() => { void loadQuestions(false); }, 0);
     return () => clearTimeout(timer);
   }, [loadQuestions]);
+
+  /** Selects the next unseen question, or fetches a new batch if all are seen. */
+  function handleNext() {
+    const unseen = questions.map((_, i) => i).filter((i) => !seen.has(i));
+    if (unseen.length === 0) {
+      void loadQuestions(true);
+    } else {
+      const nextIndex = unseen[Math.floor(Math.random() * unseen.length)];
+      setSeen((prev) => new Set([...prev, nextIndex]));
+      setCurrentIndex(nextIndex);
+      setSelected(null);
+    }
+  }
 
   if (loading || questions.length === 0) {
     return (
@@ -94,36 +109,12 @@ export default function EcoTrivia() {
     );
   }
 
-  const question = questions[currentIndex];
-  const isAnswered = selected !== null;
-  const isCorrect = selected === question?.correctIndex;
-
-  function handleAnswer(index: number): void {
-    if (!isAnswered) setSelected(index);
-  }
-
-  function handleNext(): void {
-    const unseen = questions.map((_, i) => i).filter((i) => !seen.has(i));
-    
-    if (unseen.length === 0) {
-      // All questions seen, fetch a whole new batch from AI!
-      void loadQuestions(true);
-    } else {
-      const nextIndex = unseen[Math.floor(Math.random() * unseen.length)];
-      setSeen((prev) => new Set([...prev, nextIndex]));
-      setCurrentIndex(nextIndex);
-      setSelected(null);
-    }
-  }
-
   return (
     <section className="flex flex-col gap-4" aria-labelledby="trivia-heading">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <span className="material-symbols-outlined text-secondary" aria-hidden="true">quiz</span>
-          <h2 id="trivia-heading" className="text-headline-lg font-quicksand text-on-background">
-            Eco-Trivia
-          </h2>
+          <h2 id="trivia-heading" className="text-headline-lg font-quicksand text-on-background">Eco-Trivia</h2>
           {questions !== FALLBACK_BANK && (
             <span className="text-[10px] font-inter text-secondary bg-secondary/10 border border-secondary/20 px-2 py-0.5 rounded-full">
               AI Generated
@@ -131,63 +122,15 @@ export default function EcoTrivia() {
           )}
         </div>
       </div>
-
-      <div className="glass-card rounded-2xl p-6 flex flex-col justify-between gap-4 relative overflow-hidden">
-        {loading && (
-           <div className="absolute inset-0 bg-surface/50 backdrop-blur-sm z-10 flex items-center justify-center">
-             <span className="material-symbols-outlined text-secondary animate-spin text-3xl">progress_activity</span>
-           </div>
-        )}
-        
-        {/* Header */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="inline-block bg-secondary-container/50 text-secondary border border-secondary/20 px-2 py-1 rounded text-[10px] font-inter uppercase tracking-wide">
-              Question {seen.size} of {questions.length}
-            </span>
-            {isAnswered && (
-              <span className={`text-[10px] font-inter font-bold uppercase ${isCorrect ? "text-primary" : "text-error"}`}>
-                {isCorrect ? "✅ Correct!" : "❌ Wrong"}
-              </span>
-            )}
-          </div>
-          <p className="text-body-md font-quicksand text-on-surface mb-4">{question?.question}</p>
-        </div>
-
-        {/* Options or Result */}
-        {!isAnswered ? (
-          <div className="flex flex-col gap-2" role="group" aria-label="Answer options">
-            {question?.options.map((opt, i) => (
-              <button
-                key={opt}
-                id={`trivia-option-${i}`}
-                onClick={() => handleAnswer(i)}
-                className="w-full bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface py-2 rounded-lg text-label-sm font-inter transition-colors text-left px-4"
-                aria-label={`Answer: ${opt}`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="fade-in flex flex-col gap-3" aria-live="polite">
-            <div className={`rounded-lg p-3 ${isCorrect ? "bg-primary/10 border border-primary/20" : "bg-error-container/20 border border-error/20"}`}>
-              <p className="text-sm font-quicksand text-on-surface-variant">{question?.explanation}</p>
-            </div>
-            <button
-              id="trivia-next-btn"
-              onClick={handleNext}
-              className="w-full bg-secondary text-on-primary py-2 rounded-lg text-label-sm font-inter font-semibold transition-colors hover:bg-secondary-fixed flex items-center justify-center gap-2"
-              aria-label={seen.size === questions.length ? "Generate 5 new AI questions" : "Load next trivia question"}
-            >
-              {seen.size === questions.length ? "Generate New AI Questions" : "Next Question"}
-              <span className="material-symbols-outlined text-sm" aria-hidden="true">
-                {seen.size === questions.length ? "auto_awesome" : "arrow_forward"}
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
+      <TriviaCard
+        question={questions[currentIndex]}
+        selected={selected}
+        seenCount={seen.size}
+        totalCount={questions.length}
+        loading={loading}
+        onAnswer={(i) => { if (selected === null) setSelected(i); }}
+        onNext={handleNext}
+      />
     </section>
   );
 }

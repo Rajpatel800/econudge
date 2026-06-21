@@ -13,16 +13,9 @@
 import { NextResponse } from "next/server";
 import { sanitizeHabitInput } from "@/utils/sanitizer";
 import { EMISSION_FACTORS } from "@/utils/emissionFactors";
+import { ruleBasedFallback, type NudgeResult } from "@/utils/fallback";
 
 const AZURE_MODEL = "gpt-4.1-mini";
-
-/** Structure of the final response returned to the frontend. */
-export interface NudgeResult {
-  trees: number;
-  co2kg: number;
-  nudge: string;
-  isFallback?: boolean;
-}
 
 /** Shape of the Azure OpenAI Responses API payload. */
 interface AzureResponse {
@@ -106,43 +99,6 @@ async function analyseHabit(habit: string): Promise<NudgeResult> {
     trees: Math.max(1, Math.ceil(co2kg / 21)),
     nudge: String(extracted.nudge),
   };
-}
-
-/**
- * Rule-based fallback for when the Azure API is unavailable.
- * Uses the same verified EMISSION_FACTORS via regex extraction.
- *
- * @param habit - Raw habit string from the user.
- * @returns NudgeResult with isFallback=true flag.
- */
-export function ruleBasedFallback(habit: string): NudgeResult {
-  const h = habit.toLowerCase();
-  const n = Math.max(1, parseInt(h.match(/(\d+)/)?.[1] ?? "1"));
-
-  const milesMatch = h.match(/(\d+(?:\.\d+)?)\s*miles?/i);
-  if (milesMatch) {
-    const km = parseFloat(milesMatch[1]) * 1.609;
-    const co2kg = Math.round(EMISSION_FACTORS.car_km * km * 365);
-    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Try carpooling or working from home one day a week to cut this by 20%.", isFallback: true };
-  }
-  if (h.includes("cigarette") || h.includes("smoke") || h.includes("cigar")) {
-    const co2kg = Math.round(EMISSION_FACTORS.cigarette * n * 365);
-    return { co2kg: Math.max(1, co2kg), trees: Math.max(1, Math.ceil(co2kg / 21)), nudge: `Smoking ${n} cigarettes daily adds up — cutting to ${Math.max(1, Math.floor(n / 2))} would halve your carbon footprint.`, isFallback: true };
-  }
-  if (h.includes("beef") || h.includes("burger") || h.includes("steak")) {
-    const co2kg = Math.round(EMISSION_FACTORS.beef_burger * n * 365);
-    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: `Swapping ${n} beef burgers for chicken daily would cut your food footprint by over 75%.`, isFallback: true };
-  }
-  if (h.includes("flight") || h.includes("fly") || h.includes("plane")) {
-    const co2kg = Math.round(EMISSION_FACTORS.flight_domestic * n * 12);
-    return { co2kg, trees: Math.ceil(co2kg / 21), nudge: "Consider trains for journeys under 500 km — they emit 90% less CO₂ than flying.", isFallback: true };
-  }
-  if (h.includes("stream") || h.includes("netflix") || h.includes("youtube") || h.includes("video")) {
-    const co2kg = Math.round(EMISSION_FACTORS.streaming_hour * n * 365);
-    return { co2kg: Math.max(1, co2kg), trees: Math.max(1, Math.ceil(co2kg / 21)), nudge: "Download content over Wi-Fi and watch offline — streaming on cellular uses 20× more energy.", isFallback: true };
-  }
-
-  return { co2kg: 180, trees: 9, nudge: "Small swaps add up. Try one plant-based meal a week to reduce your annual footprint.", isFallback: true };
 }
 
 /**
